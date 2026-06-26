@@ -13,6 +13,8 @@ lavalink:
       snapshot: false
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
       snapshot: false
+    - dependency: "com.github.topi314.lavalyrics:lavalyrics-plugin:1.1.0"
+      snapshot: false
 
   server:
     password: "${LAVALINK_PASSWORD:minionsbot2026}"
@@ -115,6 +117,14 @@ plugins:
       - deezer
       - youtube
       - soundcloud
+
+  lavalyrics:
+    # Provedores de letra (vêm do LavaSrc). spotify costuma ter letras boas e
+    # sincronizadas; deezer só vale se DEEZER_ENABLED=true; youtube como fallback.
+    sources:
+      - spotify
+      - deezer
+      - youtube
 
 metrics:
   prometheus:

@@ -155,6 +155,12 @@ module.exports = async (client, interaction) => {
         return QueueNavigator(client, interaction);
     }
 
+    // Equalizador interativo (eq:up/down/preset)
+    if (interaction.isButton() && interaction.customId.startsWith("eq:")) {
+        const { handleEqButton } = require("../util/Equalizer");
+        return handleEqButton(client, interaction);
+    }
+
     if (interaction.isContextMenuCommand()) {
         let command = client.contextCommands.find(
             (x) => x.command.name == interaction.commandName,

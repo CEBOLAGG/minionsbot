@@ -244,9 +244,10 @@ module.exports = async (client, interaction) => {
 	if (property === "ToggleFilters") {
 		const currentShowFilters = client.getPlayerData(guildId, "showFilters") || false;
 		client.setPlayerData(guildId, "showFilters", !currentShowFilters);
-		// Fechar volume quando abrir filtros
+		// Fechar volume e fila quando abrir filtros
 		if (!currentShowFilters) {
 			client.setPlayerData(guildId, "showVolume", false);
+			client.setPlayerData(guildId, "showQueue", false);
 		}
 		
 		const currentSong = player.current || player.queue?.current;
@@ -477,9 +478,10 @@ module.exports = async (client, interaction) => {
 		// Toggle de volume diretamente no player
 		const currentShowVolume = client.getPlayerData(guildId, "showVolume") || false;
 		client.setPlayerData(guildId, "showVolume", !currentShowVolume);
-		// Fechar filtros quando abrir volume
+		// Fechar filtros e fila quando abrir volume
 		if (!currentShowVolume) {
 			client.setPlayerData(guildId, "showFilters", false);
+			client.setPlayerData(guildId, "showQueue", false);
 		}
 		
 		const currentSong = player.current || player.queue?.current;
@@ -507,6 +509,58 @@ module.exports = async (client, interaction) => {
 			}
 		}
 		return interaction.deferUpdate();
+	}
+
+	// ===== FILA INLINE: toggle, paginação e remover =====
+	const rerenderPlayer = () => {
+		const currentSong = player.current || player.queue?.current;
+		const showFilters = client.getPlayerData(guildId, "showFilters") || false;
+		const showVolume = client.getPlayerData(guildId, "showVolume") || false;
+		const useComponentsV2 = client.getPlayerData(guildId, "useComponentsV2");
+		const currentPosition = client.getPlayerData(guildId, "trackStartTime")
+			? Date.now() - client.getPlayerData(guildId, "trackStartTime")
+			: 0;
+		if (!currentSong) return interaction.deferUpdate().catch(() => {});
+		if (useComponentsV2) {
+			return interaction.update(client.createPlayerV2(guildId, player, currentSong, { showFilters, showVolume, currentPosition }));
+		}
+		return interaction.update({ components: client.createController(guildId, player, { showFilters, showVolume }) });
+	};
+
+	if (property === "ToggleQueue") {
+		if (!player) return interaction.deferUpdate().catch(() => {});
+		const showQueue = client.getPlayerData(guildId, "showQueue") || false;
+		client.setPlayerData(guildId, "showQueue", !showQueue);
+		if (!showQueue) {
+			// abrindo a fila: fecha volume/filtros e volta pra página 0
+			client.setPlayerData(guildId, "showVolume", false);
+			client.setPlayerData(guildId, "showFilters", false);
+			client.setPlayerData(guildId, "queuePage", 0);
+		}
+		return rerenderPlayer();
+	}
+
+	if (property === "QPage") {
+		if (!player) return interaction.deferUpdate().catch(() => {});
+		const dir = interaction.customId.split(":")[3];
+		const total = Math.max(1, Math.ceil((player.queue?.tracks?.length || 0) / 4));
+		let qpage = client.getPlayerData(guildId, "queuePage") || 0;
+		qpage = dir === "next" ? Math.min(qpage + 1, total - 1) : Math.max(qpage - 1, 0);
+		client.setPlayerData(guildId, "queuePage", qpage);
+		return rerenderPlayer();
+	}
+
+	if (property === "QRemove") {
+		if (!player) return interaction.deferUpdate().catch(() => {});
+		const idx = parseInt(interaction.customId.split(":")[3]);
+		const upcoming = player.queue?.tracks || [];
+		if (!isNaN(idx) && idx >= 0 && idx < upcoming.length) {
+			try { player.queue.remove(idx); } catch (e) { client.warn?.(`QRemove: ${e.message}`); }
+			const total = Math.max(1, Math.ceil((player.queue?.tracks?.length || 0) / 4));
+			let qpage = client.getPlayerData(guildId, "queuePage") || 0;
+			if (qpage > total - 1) client.setPlayerData(guildId, "queuePage", total - 1);
+		}
+		return rerenderPlayer();
 	}
 
 	return interaction.reply({
