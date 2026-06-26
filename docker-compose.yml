@@ -1,0 +1,50 @@
+# Stack única do minionsbot: lavalink + cobalt + bot.
+#   docker compose up -d --build
+#   docker compose run --rm bot npm run deploy   # registra os slash commands (1x)
+#   docker compose logs -f bot
+services:
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4
+    restart: unless-stopped
+    container_name: minions-lavalink
+    env_file: .env
+    environment:
+      # preferIPv4Stack: força IPv4 (IPv6 parcial/quebrado faz os streams de áudio
+      # falharem — SoundCloud 404 / YouTube mudo).
+      _JAVA_OPTIONS: "-Xmx1G -Xms256m -Djava.net.preferIPv4Stack=true"
+      SERVER_PORT: "2333"
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+    expose:
+      - "2333"
+    networks: [botnet]
+
+  cobalt:
+    image: ghcr.io/imputnet/cobalt:11
+    init: true
+    read_only: true
+    restart: unless-stopped
+    container_name: minions-cobalt
+    environment:
+      API_URL: "http://cobalt:9000/"
+    expose:
+      - "9000"
+    networks: [botnet]
+
+  bot:
+    build: .
+    restart: unless-stopped
+    container_name: minions-bot
+    env_file: .env
+    environment:
+      # Sobrescreve para a rede interna do compose.
+      LAVALINK_HOST: "lavalink"
+      LAVALINK_PORT: "2333"
+      COBALT_BASE_URL: "http://cobalt:9000/"
+    depends_on:
+      - lavalink
+      - cobalt
+    networks: [botnet]
+
+networks:
+  botnet:

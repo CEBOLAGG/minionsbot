@@ -1,0 +1,133 @@
+# Lavalink v4 self-hosted (roda no docker-compose como serviço "lavalink").
+# Credenciais vêm do .env (substituição ${VAR:default} do Lavalink/Spring).
+# Se algum plugin falhar ao baixar no boot, ajuste a versão aqui.
+server:
+  port: 2333
+  address: 0.0.0.0
+
+lavalink:
+  plugins:
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
+      snapshot: false
+    - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0"
+      snapshot: false
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
+      snapshot: false
+
+  server:
+    password: "${LAVALINK_PASSWORD:minionsbot2026}"
+    sources:
+      youtube: false        # quem cuida do YouTube é o youtube-plugin
+      bandcamp: true
+      soundcloud: true
+      twitch: true
+      vimeo: true
+      http: true
+      local: false
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    opusEncodingQuality: 10
+    resamplingQuality: HIGH
+    trackStuckThresholdMs: 10000
+    useSeekGhosting: true
+    youtubePlaylistLoadLimit: 100
+    playerUpdateInterval: 1
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+    gc-warnings: true
+
+plugins:
+  youtube:
+    enabled: true
+    # 1º boot: deixe YT_REFRESH_TOKEN vazio -> os logs mostram uma URL google.com/device
+    # + código; logue com uma conta Google descartável e cole o refreshToken gerado no .env.
+    oauth:
+      enabled: true
+      refreshToken: "${YT_REFRESH_TOKEN:}"
+    # remoteCipher: É O QUE DESTRAVA O ÁUDIO. O plugin sozinho não decifra mais a
+    # assinatura do player do YouTube (erro "must find sig function") -> delega isso
+    # a um servidor yt-cipher. Padrão: instância pública (sem senha). Pra self-hostar,
+    # rode o yt-cipher (docker) e ponha YT_CIPHER_URL/YT_CIPHER_PASSWORD no .env.
+    remoteCipher:
+      url: "${YT_CIPHER_URL:https://cipher.kikkia.dev}"
+      password: "${YT_CIPHER_PASSWORD:}"
+    # PoToken (opcional): ajuda o client WEB a evitar checagem de "não sou robô".
+    pot:
+      token: "${YT_PO_TOKEN:}"
+      visitorData: "${YT_VISITOR_DATA:}"
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    # Ordem importa: MUSIC e ANDROID_VR NÃO precisam de PoToken (servem áudio direto).
+    # WEB/WEBEMBEDDED precisam de PoToken; ficam por último como fallback.
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - WEB
+      - WEBEMBEDDED
+
+  lavasrc:
+    providers:
+      - "ytsearch:%QUERY%"
+      - "ytmsearch:%QUERY%"
+      - "scsearch:%QUERY%"
+    sources:
+      spotify: true
+      applemusic: "${APPLEMUSIC_ENABLED:false}"
+      deezer: "${DEEZER_ENABLED:false}"
+      yandexmusic: false
+      flowerytts: false
+      youtube: true
+    audioTrackInfo:
+      useOriginalArtwork: true
+    spotify:
+      clientId: "${SPOTIFY_CLIENT_ID:}"
+      clientSecret: "${SPOTIFY_CLIENT_SECRET:}"
+      countryCode: "BR"
+      playlistLoadLimit: 6
+      albumLoadLimit: 6
+      resolveArtistsInSearch: true
+      localFiles: false
+    applemusic:
+      countryCode: "BR"
+      mediaAPIToken: "${APPLEMUSIC_TOKEN:}"
+      playlistLoadLimit: 6
+      albumLoadLimit: 6
+    deezer:
+      masterDecryptionKey: "${DEEZER_MASTER_KEY:g4el58wc0zvf9na1}"
+      arl: "${DEEZER_ARL:}"
+
+  lavasearch:
+    sources:
+      - spotify
+      - applemusic
+      - deezer
+      - youtube
+      - soundcloud
+
+metrics:
+  prometheus:
+    enabled: false
+    endpoint: /metrics
+
+logging:
+  file:
+    path: ./logs/
+  level:
+    root: INFO
+    lavalink: INFO
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 30

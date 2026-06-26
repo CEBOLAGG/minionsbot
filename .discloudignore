@@ -1,0 +1,18 @@
+# Docker files - not used in this project
+docker-compose.yml
+docker-compose.yaml
+Dockerfile
+.dockerignore
+docker/
+
+# Node modules (already ignored by default, but being explicit)
+node_modules/
+
+# Other files
+.git/
+.vscode/
+.idea/
+*.log
+.env
+.env.local
+

@@ -1,0 +1,19 @@
+node_modules
+.git
+.env
+.env.local
+*.log
+logs.log
+
+# Lavalink roda em container separado — o bot não precisa do jar/plugins/logs
+lavalink/Lavalink.jar
+lavalink/plugins
+lavalink/logs
+
+# caches/efêmeros
+.cache
+dashboard/.next
+dashboard/node_modules
+Dockerfile
+docker-compose*.yml
+.dockerignore

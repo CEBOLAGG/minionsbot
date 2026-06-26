@@ -1,0 +1,79 @@
+{
+  "name": "discord-musicbot",
+  "version": "6.0.0",
+  "description": "Very simple discord music bot with the discord.js with Song Name playing. It can able to play music with the song name",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index",
+    "rm-logs": "rm logs.log",
+    "lint": "prettier --check .",
+    "deploy": "node deploy/deployGlobal",
+    "guild": "node deploy/deployGuild",
+    "destroy-guild": "node deploy/destroyGuild",
+    "destroy-global": "node deploy/destroyGlobal",
+    "ddev": "cd dashboard && npm run dev",
+    "dbuild": "cd dashboard && npm run build && npm run export",
+    "dstart": "cd dashboard && npm run start"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SudhanPlayz/Discord-MusicBot.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "discord",
+    "discord-bot",
+    "discord-musicbot",
+    "music",
+    "discord-music"
+  ],
+  "authors": [
+    "CEBOLAGG"
+  ],
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/SudhanPlayz/Discord-MusicBot/issues"
+  },
+  "homepage": "https://github.com/SudhanPlayz/Discord-MusicBot#readme",
+  "dependencies": {
+    "axios": "^1.6.8",
+    "cheerio": "^1.0.0-rc.12",
+    "claude": "^0.0.6",
+    "colors": "^1.4.0",
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.1.5",
+    "express-session": "^1.18.0",
+    "express-ws": "^5.0.2",
+    "js-yaml": "^4.1.0",
+    "jsoning": "^0.13.0",
+    "lavalink-client": "^2.10.3",
+    "lodash": "^4.17.21",
+    "mathjs": "^12.3.0",
+    "moment": "^2.30.1",
+    "moment-duration-format": "^2.3.2",
+    "moment-timezone": "^0.6.0",
+    "mongoose": "^9.0.1",
+    "node-fetch": "^2.7.0",
+    "passport": "^0.7.0",
+    "passport-discord": "^0.1.4",
+    "pretty-ms": "^7.0.1",
+    "riffy": "^1.0.8",
+    "rlyrics": "^2.0.1",
+    "sharp": "^0.35.2",
+    "systeminformation": "^5.21.30",
+    "winston": "^3.11.0",
+    "youtube-sr": "^4.3.4"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5"
+  },
+  "volta": {
+    "node": "20.0.0",
+    "yarn": "3.3.0"
+  }
+}
