@@ -7,7 +7,9 @@ services:
     image: ghcr.io/lavalink-devs/lavalink:4
     restart: unless-stopped
     container_name: minions-lavalink
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       # preferIPv4Stack: força IPv4 (IPv6 parcial/quebrado faz os streams de áudio
       # falharem — SoundCloud 404 / YouTube mudo).
@@ -35,7 +37,9 @@ services:
     build: .
     restart: unless-stopped
     container_name: minions-bot
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Sobrescreve para a rede interna do compose.
       LAVALINK_HOST: "lavalink"
