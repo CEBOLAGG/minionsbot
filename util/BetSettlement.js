@@ -9,7 +9,9 @@ const {
     getAllPendingBets,
     settleBet,
     recordBetResult,
-    getOrCreateWallet
+    getOrCreateWallet,
+    updateWalletBalance,
+    refundBet
 } = require("./mongodb");
 
 const BANANA_EMOJI = "🍌";
@@ -18,6 +20,22 @@ const MINION_EMOJI = "🟡";
 // Cache de jogos já verificados (evita spam na API)
 const checkedMatches = new Map();
 const CHECK_CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+
+// Guard pra impedir execuções sobrepostas do settlement (que pagavam aposta 2x).
+let isSettling = false;
+
+// Converte score da ESPN em inteiro; null se ausente/inválido. NÃO usar `||0`,
+// senão placar faltando vira 0-0 ("empate" falso) e liquida errado.
+function parseScore(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(typeof v === "object" ? v?.displayValue ?? v?.value : v);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+// Estados terminais NÃO-completos (jogo não vai acontecer) -> reembolsar.
+function isCancelledStatus(name) {
+    return /CANCEL|POSTPON|ABANDON|SUSPEND|FORFEIT/i.test(name || "");
+}
 
 /**
  * Limpa cache antigo
@@ -63,15 +81,14 @@ async function fetchMatchResult(matchId, leagueId) {
                         const competitors = competition.competitors || [];
                         const status = competition.status;
                         
+                        if (isCancelledStatus(status?.type?.name)) return { cancelled: true };
                         if (status?.type?.completed) {
                             const homeTeam = competitors.find(c => c.homeAway === "home");
                             const awayTeam = competitors.find(c => c.homeAway === "away");
-                            
-                            return {
-                                finished: true,
-                                homeScore: parseInt(homeTeam?.score) || 0,
-                                awayScore: parseInt(awayTeam?.score) || 0
-                            };
+                            const hs = parseScore(homeTeam?.score);
+                            const as = parseScore(awayTeam?.score);
+                            if (hs === null || as === null) return { finished: false };
+                            return { finished: true, homeScore: hs, awayScore: as };
                         }
                     }
                 }
@@ -83,24 +100,28 @@ async function fetchMatchResult(matchId, leagueId) {
         
         const competition = match.competitions?.[0];
         const status = match.status;
-        
-        // Verifica se o jogo terminou
-        const isFinished = status?.type?.completed === true || 
-                          status?.type?.name === "STATUS_FINAL" ||
-                          status?.type?.name === "STATUS_FULL_TIME";
-        
+        const statusName = status?.type?.name || "";
+
+        if (isCancelledStatus(statusName)) return { cancelled: true };
+
+        const isFinished = status?.type?.completed === true ||
+                          statusName === "STATUS_FINAL" ||
+                          statusName === "STATUS_FULL_TIME";
+
         if (!isFinished) {
             return { finished: false };
         }
-        
+
         const homeTeamData = competition?.competitors?.find(c => c.homeAway === "home");
         const awayTeamData = competition?.competitors?.find(c => c.homeAway === "away");
-        
-        return {
-            finished: true,
-            homeScore: parseInt(homeTeamData?.score) || 0,
-            awayScore: parseInt(awayTeamData?.score) || 0
-        };
+        const homeScore = parseScore(homeTeamData?.score);
+        const awayScore = parseScore(awayTeamData?.score);
+
+        // Placar incompleto num jogo "completed" — NÃO liquida (evita 0-0/empate
+        // falso); re-tenta na próxima rodada.
+        if (homeScore === null || awayScore === null) return { finished: false };
+
+        return { finished: true, homeScore, awayScore };
         
     } catch (error) {
         console.error(`Erro ao buscar resultado do jogo ${matchId}:`, error.message);
@@ -132,17 +153,19 @@ async function processBet(bet, result, client) {
         const winner = determineWinner(result.homeScore, result.awayScore);
         const won = bet.betType === winner;
         
-        // Atualiza status da aposta
-        await settleBet(bet._id, won ? "won" : "lost", {
+        // Transição ATÔMICA pending -> won/lost. Se retornar null, outra execução do
+        // loop já liquidou esta aposta — NÃO credita de novo (idempotência).
+        const settled = await settleBet(bet._id, won ? "won" : "lost", {
             homeScore: result.homeScore,
             awayScore: result.awayScore,
             winner: winner
         });
-        
-        // Atualiza carteira do usuário
+        if (!settled) return false;
+
+        // Atualiza carteira (só após ter feito a transição com sucesso)
         if (won) {
-            // Ganhou - recebe o ganho potencial
-            await recordBetResult(bet.odId, true, bet.potentialWin);
+            // Ganhou - recebe o ganho potencial (líquido contabilizado em totalWon)
+            await recordBetResult(bet.odId, true, bet.potentialWin, bet.betAmount);
         } else {
             // Perdeu - já foi deduzido quando apostou
             await recordBetResult(bet.odId, false, bet.betAmount);
@@ -215,10 +238,24 @@ async function processBet(bet, result, client) {
  * @returns {Promise<{processed: number, won: number, lost: number}>}
  */
 async function settlePendingBets(client) {
+    // Guard: nunca rodar duas liquidações ao mesmo tempo (causava pagamento duplo).
+    if (isSettling) {
+        console.log("[BetSettlement] rodada anterior ainda em execução — pulando.");
+        return { processed: 0, won: 0, lost: 0 };
+    }
+    isSettling = true;
+    try {
+        return await _settlePendingBets(client);
+    } finally {
+        isSettling = false;
+    }
+}
+
+async function _settlePendingBets(client) {
     cleanCache();
-    
+
     const pendingBets = await getAllPendingBets();
-    
+
     if (!pendingBets || pendingBets.length === 0) {
         return { processed: 0, won: 0, lost: 0 };
     }
@@ -249,14 +286,36 @@ async function settlePendingBets(client) {
         
         // Busca resultado do jogo
         const result = await fetchMatchResult(matchId, leagueId);
-        
+
         if (!result) {
+            // Jogo não encontrado. Se já passou muito tempo (>7 dias), reembolsa pra
+            // não prender o saldo do apostador pra sempre.
+            const oldest = Math.min(...bets.map(b => new Date(b.matchDate).getTime() || Date.now()));
+            if (Date.now() - oldest > 7 * 24 * 60 * 60 * 1000) {
+                console.log(`[BetSettlement] Jogo ${matchId} sumiu há +7 dias — reembolsando.`);
+                for (const bet of bets) {
+                    const refunded = await refundBet(bet._id);
+                    if (refunded) await updateWalletBalance(bet.odId, bet.betAmount);
+                }
+                checkedMatches.set(key, Date.now());
+            }
             continue;
         }
-        
+
+        // Jogo cancelado/adiado/abandonado — reembolsa todas as apostas
+        if (result.cancelled) {
+            console.log(`[BetSettlement] Jogo ${matchId} cancelado/adiado — reembolsando ${bets.length} aposta(s).`);
+            for (const bet of bets) {
+                const refunded = await refundBet(bet._id);
+                if (refunded) await updateWalletBalance(bet.odId, bet.betAmount);
+            }
+            checkedMatches.set(key, Date.now());
+            continue;
+        }
+
         // Adiciona ao cache
         checkedMatches.set(key, Date.now());
-        
+
         if (!result.finished) {
             continue;
         }
@@ -296,19 +355,18 @@ async function settlePendingBets(client) {
 function startBetSettlementLoop(client, intervalMs = 5 * 60 * 1000) {
     console.log(`[BetSettlement] Iniciando loop de verificação (intervalo: ${intervalMs/1000}s)`);
     
-    // Primeira verificação após 30 segundos
-    setTimeout(() => {
-        settlePendingBets(client).catch(err => {
-            console.error("[BetSettlement] Erro na verificação inicial:", err);
-        });
-    }, 30000);
-    
-    // Loop contínuo
-    setInterval(() => {
-        settlePendingBets(client).catch(err => {
+    // setTimeout recursivo: só reagenda DEPOIS que a rodada termina, evitando
+    // execuções sobrepostas (que podiam pagar a mesma aposta 2x).
+    const tick = async () => {
+        try {
+            await settlePendingBets(client);
+        } catch (err) {
             console.error("[BetSettlement] Erro na verificação:", err);
-        });
-    }, intervalMs);
+        } finally {
+            setTimeout(tick, intervalMs);
+        }
+    };
+    setTimeout(tick, 30000); // primeira verificação após 30s
 }
 
 module.exports = {

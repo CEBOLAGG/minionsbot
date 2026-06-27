@@ -7,9 +7,11 @@ const { EmbedBuilder, Colors } = require("discord.js");
 const {
     getOrCreateWallet,
     updateWalletBalance,
+    debitIfEnough,
     createBet,
     getUserBetOnMatch
 } = require("../util/mongodb");
+const { getBetOdds } = require("../util/betOdds");
 const { handleButton } = require("../lib/download/buttons");
 
 /**
@@ -227,54 +229,42 @@ const MINION_EMOJI = "🟡";
 const BET_MIN = 10;
 const BET_MAX = 100000;
 
-const LEAGUES = {
-    "bra.1": { name: "Brasileirão Série A", emoji: "🇧🇷" },
-    "bra.2": { name: "Brasileirão Série B", emoji: "🇧🇷" },
-    "bra.3": { name: "Copa do Brasil", emoji: "🇧🇷" },
-    "eng.1": { name: "Premier League", emoji: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-    "esp.1": { name: "La Liga", emoji: "🇪🇸" },
-    "ita.1": { name: "Serie A", emoji: "🇮🇹" },
-    "ger.1": { name: "Bundesliga", emoji: "🇩🇪" },
-    "fra.1": { name: "Ligue 1", emoji: "🇫🇷" },
-    "uefa.champions": { name: "Champions League", emoji: "🏆" },
-    "uefa.europa": { name: "Europa League", emoji: "🏆" },
-    "conmebol.libertadores": { name: "Copa Libertadores", emoji: "🏆" },
-    "conmebol.sudamericana": { name: "Copa Sul-Americana", emoji: "🏆" },
-    "arg.1": { name: "Primera División (ARG)", emoji: "🇦🇷" },
-    "mex.1": { name: "Liga MX", emoji: "🇲🇽" },
-    "por.1": { name: "Primeira Liga", emoji: "🇵🇹" },
-};
+// Lista de ligas compartilhada com o board (/minionsbet). Importar do módulo único
+// evita que o modal fique com menos ligas que o board -> "jogo não encontrado".
+const { LEAGUES } = require("../util/leagues");
 
 /**
  * Handler para modal de aposta
  */
 async function handleBetModal(client, interaction) {
-    // betmodal:matchId:betType:odds
-    const [, matchId, betType, oddsStr] = interaction.customId.split(":");
-    const odds = parseFloat(oddsStr);
-    
-    // Pega o valor da aposta do modal
-    const amountStr = interaction.fields.getTextInputValue("amount");
-    const amount = parseInt(amountStr.replace(/\D/g, "")); // Remove não-numéricos
-    
-    // Validações
-    if (isNaN(amount) || amount <= 0) {
-        return interaction.reply({
-            content: "❌ Valor inválido! Digite apenas números.",
-            ephemeral: true
-        });
+    // betmodal:matchId:betType:odds  — a odd do customId é IGNORADA (vem do servidor)
+    const [, matchId, betType] = interaction.customId.split(":");
+
+    // Tipo de aposta válido?
+    if (!["home", "draw", "away"].includes(betType)) {
+        return interaction.reply({ content: "❌ Tipo de aposta inválido.", ephemeral: true });
     }
-    
+
+    // Valor: exige APENAS dígitos (rejeita 10.5, -50, 1,000, 10k em vez de aceitar errado)
+    const amountStr = (interaction.fields.getTextInputValue("amount") || "").trim();
+    if (!/^\d+$/.test(amountStr)) {
+        return interaction.reply({ content: "❌ Valor inválido! Digite **apenas números inteiros** (ex.: 100).", ephemeral: true });
+    }
+    const amount = parseInt(amountStr, 10);
+
     if (amount < BET_MIN) {
-        return interaction.reply({
-            content: `❌ Aposta mínima: **${BET_MIN}** ${BANANA_EMOJI}`,
-            ephemeral: true
-        });
+        return interaction.reply({ content: `❌ Aposta mínima: **${BET_MIN}** ${BANANA_EMOJI}`, ephemeral: true });
     }
-    
     if (amount > BET_MAX) {
+        return interaction.reply({ content: `❌ Aposta máxima: **${BET_MAX.toLocaleString("pt-BR")}** ${BANANA_EMOJI}`, ephemeral: true });
+    }
+
+    // Odd: lida do SERVIDOR (gravada no clique). Nunca confiar no customId — senão o
+    // usuário forja `...:home:999999` e recebe payout arbitrário.
+    const odds = getBetOdds(`${interaction.user.id}:${matchId}:${betType}`);
+    if (!Number.isFinite(odds) || odds < 1.01 || odds > 100) {
         return interaction.reply({
-            content: `❌ Aposta máxima: **${BET_MAX.toLocaleString("pt-BR")}** ${BANANA_EMOJI}`,
+            content: "❌ Odd expirada/indisponível. Reabra o jogo e clique em apostar de novo.",
             ephemeral: true
         });
     }
@@ -282,50 +272,50 @@ async function handleBetModal(client, interaction) {
     await interaction.deferReply({ ephemeral: true });
     
     try {
-        // Verifica saldo
+        // Garante a carteira (lança se o DB cair -> cai no catch; sem saldo fantasma)
         const wallet = await getOrCreateWallet(interaction.user.id);
-        
+
+        // Resolve o jogo de forma ROBUSTA (todos os status, ontem/hoje/amanhã) — acaba
+        // com o "jogo não encontrado/já começou" falso por timezone/virada de dia.
+        const matches = await fetchBettableMatchesForModal();
+        const match = matches?.find(m => String(m.id) === String(matchId));
+
+        if (!match) {
+            return interaction.editReply({
+                content: "❌ Não achei esse jogo na lista atual. Reabra `/minionsbet` e tente de novo.",
+            });
+        }
+
+        // Trava dura: status + horário (não deixa apostar em jogo já começado, mesmo
+        // que a API atrase o status).
+        const startMs = new Date(match.dateTime).getTime();
+        if (match.status !== "scheduled" || (Number.isFinite(startMs) && startMs <= Date.now())) {
+            return interaction.editReply({ content: "❌ Esse jogo já começou — apostas encerradas." });
+        }
+
+        // Saldo (mensagem amigável antes do débito atômico)
         if (wallet.balance < amount) {
             return interaction.editReply({
                 content: `❌ Saldo insuficiente!\nVocê tem **${wallet.balance.toLocaleString("pt-BR")}** ${BANANA_EMOJI} mas tentou apostar **${amount.toLocaleString("pt-BR")}** ${BANANA_EMOJI}`,
             });
         }
-        
-        // Busca dados do jogo novamente para garantir atualização.
-        // Resolve por ID estável (não por índice): entre o clique do botão e o envio
-        // do modal o array pode reordenar/refetchar, o que apostava no jogo errado.
-        const today = moment().tz("America/Sao_Paulo").format("YYYYMMDD");
-        const matches = await fetchBettableMatchesForModal(today);
-        const match = matches?.find(m => String(m.id) === String(matchId));
 
-        if (!match) {
-            return interaction.editReply({
-                content: "❌ Jogo não encontrado ou já começou!",
-            });
-        }
-        
-        // Verifica se jogo não começou
-        if (match.status !== "scheduled") {
-            return interaction.editReply({
-                content: "❌ Este jogo já começou! Não é possível apostar.",
-            });
-        }
-        
-        // Verifica se já apostou
+        // Já apostou nesse jogo? (caminho rápido; o índice único é o backstop de race)
         const existingBet = await getUserBetOnMatch(interaction.user.id, match.id);
         if (existingBet) {
-            return interaction.editReply({
-                content: "❌ Você já apostou neste jogo!",
-            });
+            return interaction.editReply({ content: "❌ Você já apostou neste jogo!" });
         }
-        
-        // Calcula ganho potencial
+
         const potentialWin = Math.floor(amount * odds);
-        
-        // Deduz do saldo
-        await updateWalletBalance(interaction.user.id, -amount);
-        
-        // Cria aposta
+
+        // Débito ATÔMICO e condicional: só debita se houver saldo (sem race -> negativo)
+        const debited = await debitIfEnough(interaction.user.id, amount);
+        if (!debited) {
+            return interaction.editReply({ content: "❌ Saldo insuficiente. Confira com `/minionsbet saldo`." });
+        }
+
+        // Cria a aposta. O índice único {odId,matchId,pending} barra dupla aposta por
+        // race; se falhar, estorna o valor debitado.
         const bet = await createBet({
             odId: interaction.user.id,
             odGuildId: interaction.guildId,
@@ -341,12 +331,11 @@ async function handleBetModal(client, interaction) {
             potentialWin: potentialWin,
             status: "pending"
         });
-        
+
         if (!bet) {
-            // Reembolsa se falhou
-            await updateWalletBalance(interaction.user.id, amount);
+            await updateWalletBalance(interaction.user.id, amount); // estorno
             return interaction.editReply({
-                content: "❌ Erro ao registrar aposta. Tente novamente.",
+                content: "❌ Não deu pra registrar (você já apostou nesse jogo ou houve um erro). Saldo estornado.",
             });
         }
         
@@ -354,7 +343,7 @@ async function handleBetModal(client, interaction) {
         const betTypeText = getBetTypeTextForModal(betType, match);
         const matchTime = moment(match.dateTime).tz("America/Sao_Paulo").format("DD/MM HH:mm");
         
-        const newBalance = wallet.balance - amount;
+        const newBalance = debited.balance;
         
         const embed = new EmbedBuilder()
             .setTitle(`${MINION_EMOJI} Aposta Confirmada!`)
@@ -413,34 +402,45 @@ async function handleBetModal(client, interaction) {
 /**
  * Busca jogos para o modal
  */
-async function fetchBettableMatchesForModal(date) {
-    const allMatches = [];
-    
-    const promises = Object.keys(LEAGUES).map(async (leagueId) => {
-        try {
-            const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/${leagueId}/scoreboard?dates=${date}`;
-            const response = await fetch(url, { timeout: 10000 });
-            
-            if (!response.ok) return [];
-            
-            const data = await response.json();
-            
-            if (!data.events || data.events.length === 0) return [];
-            
-            return data.events
-                .map(event => parseMatchForModal(event, leagueId))
-                .filter(m => m.status === "scheduled");
-        } catch (err) {
-            return [];
+async function fetchBettableMatchesForModal() {
+    const tz = "America/Sao_Paulo";
+    // ontem / hoje / amanhã — cobre virada de dia e diferença de fuso da ESPN.
+    const dates = [
+        moment().tz(tz).subtract(1, "day").format("YYYYMMDD"),
+        moment().tz(tz).format("YYYYMMDD"),
+        moment().tz(tz).add(1, "day").format("YYYYMMDD"),
+    ];
+
+    const tasks = [];
+    for (const leagueId of Object.keys(LEAGUES)) {
+        for (const date of dates) {
+            tasks.push((async () => {
+                try {
+                    const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/${leagueId}/scoreboard?dates=${date}`;
+                    const response = await fetch(url, { timeout: 10000 });
+                    if (!response.ok) return [];
+                    const data = await response.json();
+                    if (!data.events || data.events.length === 0) return [];
+                    // SEM filtro de status — quem decide é o handler (status + horário).
+                    return data.events.map(event => parseMatchForModal(event, leagueId));
+                } catch (err) {
+                    return [];
+                }
+            })());
         }
-    });
-    
-    const results = await Promise.all(promises);
-    results.forEach(matches => allMatches.push(...matches));
-    
-    return allMatches.sort((a, b) => {
-        return new Date(a.dateTime) - new Date(b.dateTime);
-    });
+    }
+
+    const results = await Promise.all(tasks);
+    const seen = new Set();
+    const all = [];
+    for (const arr of results) {
+        for (const m of arr) {
+            if (seen.has(m.id)) continue;
+            seen.add(m.id);
+            all.push(m);
+        }
+    }
+    return all;
 }
 
 /**

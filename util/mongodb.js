@@ -569,6 +569,8 @@ const BetSchema = new mongoose.Schema({
 // Index composto para busca eficiente
 BetSchema.index({ odId: 1, status: 1 });
 BetSchema.index({ matchId: 1, status: 1 });
+// Backstop de race: impede 2 apostas PENDENTES do mesmo usuário no mesmo jogo.
+BetSchema.index({ odId: 1, matchId: 1 }, { unique: true, partialFilterExpression: { status: "pending" } });
 
 const Wallet = mongoose.models.Wallet || mongoose.model("Wallet", WalletSchema);
 const Bet = mongoose.models.Bet || mongoose.model("Bet", BetSchema);
@@ -687,7 +689,9 @@ const getOrCreateWallet = async (odId) => {
         return wallet;
     } catch (error) {
         console.error(`[MongoDB] Error getting/creating wallet ${odId}:`, error.message);
-        return { odId, balance: 1000, totalWon: 0, totalLost: 0, totalBets: 0, winCount: 0, loseCount: 0 };
+        // NÃO retornar carteira fantasma com saldo 1000 — isso permitiria apostar sobre
+        // saldo inexistente em falha de DB. Propaga o erro pra abortar o fluxo de aposta.
+        throw error;
     }
 };
 
@@ -712,17 +716,37 @@ const updateWalletBalance = async (odId, amount) => {
 };
 
 /**
+ * Débito ATÔMICO e condicional: só remove se houver saldo suficiente.
+ * Mata a race condition (check-then-act) que deixava o saldo negativo.
+ * @returns {Promise<object|null>} carteira atualizada, ou null se saldo insuficiente
+ */
+const debitIfEnough = async (odId, amount) => {
+    try {
+        return await Wallet.findOneAndUpdate(
+            { odId, balance: { $gte: amount } },
+            { $inc: { balance: -amount } },
+            { new: true }
+        );
+    } catch (error) {
+        console.error(`[MongoDB] Error debiting wallet ${odId}:`, error.message);
+        return null;
+    }
+};
+
+/**
  * Registra resultado de aposta na carteira
  * @param {string} odId 
  * @param {boolean} won 
  * @param {number} amount 
  * @returns {Promise<object>}
  */
-const recordBetResult = async (odId, won, amount) => {
+const recordBetResult = async (odId, won, payout, stake = 0) => {
     try {
-        const update = won 
-            ? { $inc: { balance: amount, totalWon: amount, winCount: 1, totalBets: 1 } }
-            : { $inc: { totalLost: amount, loseCount: 1, totalBets: 1 } };
+        // won: credita o payout BRUTO no saldo, mas conta só o LUCRO líquido em totalWon
+        // (antes somava bruto, inflando estatística). lost: soma a stake em totalLost.
+        const update = won
+            ? { $inc: { balance: payout, totalWon: Math.max(0, payout - stake), winCount: 1, totalBets: 1 } }
+            : { $inc: { totalLost: payout, loseCount: 1, totalBets: 1 } };
         
         const wallet = await Wallet.findOneAndUpdate(
             { odId },
@@ -743,24 +767,26 @@ const recordBetResult = async (odId, won, amount) => {
  */
 const claimDaily = async (odId) => {
     try {
-        const wallet = await getOrCreateWallet(odId);
+        await getOrCreateWallet(odId); // garante que a carteira existe
         const now = new Date();
-        const lastDaily = wallet.lastDaily ? new Date(wallet.lastDaily) : null;
-        
-        // Check if 24 hours have passed
-        if (lastDaily && (now - lastDaily) < 24 * 60 * 60 * 1000) {
-            const nextClaim = new Date(lastDaily.getTime() + 24 * 60 * 60 * 1000);
-            return { success: false, nextClaim };
-        }
-        
+        const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         const dailyAmount = 500; // 500 bananas diárias
-        
-        await Wallet.findOneAndUpdate(
-            { odId },
-            { $inc: { balance: dailyAmount }, lastDaily: now },
-            { new: true, upsert: true }
+
+        // Claim ATÔMICO: só credita se nunca coletou OU já passou 24h. A condição vai
+        // no FILTRO (não em JS), então duas chamadas concorrentes não coletam 2x (race).
+        const wallet = await Wallet.findOneAndUpdate(
+            { odId, $or: [{ lastDaily: null }, { lastDaily: { $exists: false } }, { lastDaily: { $lte: cutoff } }] },
+            { $inc: { balance: dailyAmount }, $set: { lastDaily: now } },
+            { new: true }
         );
-        
+
+        if (!wallet) {
+            // Já coletou nas últimas 24h
+            const current = await Wallet.findOne({ odId });
+            const last = current?.lastDaily ? new Date(current.lastDaily) : now;
+            return { success: false, nextClaim: new Date(last.getTime() + 24 * 60 * 60 * 1000) };
+        }
+
         return { success: true, amount: dailyAmount };
     } catch (error) {
         console.error(`[MongoDB] Error claiming daily ${odId}:`, error.message);
@@ -856,12 +882,14 @@ const getUserBetOnMatch = async (odId, matchId) => {
  */
 const settleBet = async (betId, status, result) => {
     try {
-        const bet = await Bet.findByIdAndUpdate(
-            betId,
-            { 
-                status, 
-                result, 
-                settledAt: new Date() 
+        // Transição ATÔMICA pending -> won/lost. Retorna null se a aposta já não está
+        // "pending" (outra execução do loop já liquidou) — garante idempotência (não paga 2x).
+        const bet = await Bet.findOneAndUpdate(
+            { _id: betId, status: "pending" },
+            {
+                status,
+                result,
+                settledAt: new Date()
             },
             { new: true }
         );
@@ -893,14 +921,31 @@ const getAllPendingBets = async () => {
  */
 const cancelBet = async (betId) => {
     try {
-        const bet = await Bet.findByIdAndUpdate(
-            betId,
-            { status: "cancelled" },
+        const bet = await Bet.findOneAndUpdate(
+            { _id: betId, status: "pending" },
+            { status: "cancelled", settledAt: new Date() },
             { new: true }
         );
         return bet;
     } catch (error) {
         console.error(`[MongoDB] Error cancelling bet ${betId}:`, error.message);
+        return null;
+    }
+};
+
+/**
+ * Reembolsa uma aposta (pending -> refunded) de forma ATÔMICA.
+ * Retorna o doc só se ESTE processo fez a transição (evita reembolso duplo).
+ */
+const refundBet = async (betId) => {
+    try {
+        return await Bet.findOneAndUpdate(
+            { _id: betId, status: "pending" },
+            { status: "refunded", settledAt: new Date() },
+            { new: true }
+        );
+    } catch (error) {
+        console.error(`[MongoDB] Error refunding bet ${betId}:`, error.message);
         return null;
     }
 };
@@ -941,9 +986,10 @@ module.exports = {
     // Wallet functions
     getOrCreateWallet,
     updateWalletBalance,
+    debitIfEnough,
     recordBetResult,
     claimDaily,
-    
+
     // Bet functions
     createBet,
     getUserPendingBets,
@@ -953,6 +999,7 @@ module.exports = {
     settleBet,
     getAllPendingBets,
     cancelBet,
+    refundBet,
     
     // Bot Stats functions
     updateBotStats,

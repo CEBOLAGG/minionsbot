@@ -18,6 +18,7 @@ const {
 const fetch = require("node-fetch");
 const moment = require("moment-timezone");
 const { emojiTag, emojiFor } = require("../../lib/emojis");
+const { setBetOdds } = require("../../util/betOdds");
 const {
     getOrCreateWallet,
     updateWalletBalance,
@@ -63,28 +64,8 @@ const ODDS_CACHE_DURATION = 10 * 60 * 1000; // 10 minutos
 const activeBettingEmbeds = new Map(); // channelId -> { message, collector, interval }
 
 // Ligas disponíveis para apostas com mapeamento para The Odds API
-const LEAGUES = {
-    "bra.1": { name: "Brasileirão Série A", priority: 100, emoji: "🇧🇷", oddsKey: "soccer_brazil_campeonato" },
-    "bra.2": { name: "Brasileirão Série B", priority: 90, emoji: "🇧🇷", oddsKey: "soccer_brazil_serie_b" },
-    "bra.3": { name: "Brasileirão Série C", priority: 85, emoji: "🇧🇷", oddsKey: null },
-    "bra.copa_do_brazil": { name: "Copa do Brasil", priority: 95, emoji: "🇧🇷🏆", oddsKey: null },
-    "eng.1": { name: "Premier League", priority: 98, emoji: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", oddsKey: "soccer_epl" },
-    "esp.1": { name: "La Liga", priority: 97, emoji: "🇪🇸", oddsKey: "soccer_spain_la_liga" },
-    "ita.1": { name: "Serie A", priority: 96, emoji: "🇮🇹", oddsKey: "soccer_italy_serie_a" },
-    "ger.1": { name: "Bundesliga", priority: 95, emoji: "🇩🇪", oddsKey: "soccer_germany_bundesliga" },
-    "fra.1": { name: "Ligue 1", priority: 94, emoji: "🇫🇷", oddsKey: "soccer_france_ligue_one" },
-    "uefa.champions": { name: "Champions League", priority: 110, emoji: "🏆", oddsKey: "soccer_uefa_champs_league" },
-    "uefa.europa": { name: "Europa League", priority: 105, emoji: "🏆", oddsKey: "soccer_uefa_europa_league" },
-    "fifa.world": { name: "Copa do Mundo FIFA", priority: 130, emoji: "🌍🏆", oddsKey: "soccer_fifa_world_cup" },
-    "fifa.friendly": { name: "Amistosos de Seleções", priority: 70, emoji: "🌍", oddsKey: null },
-    "fifa.cwc": { name: "Mundial de Clubes", priority: 115, emoji: "🌍", oddsKey: null },
-    "fifa.intercontinental_cup": { name: "Copa Intercontinental", priority: 112, emoji: "🌍🏆", oddsKey: null },
-    "conmebol.libertadores": { name: "Copa Libertadores", priority: 108, emoji: "🏆", oddsKey: "soccer_conmebol_copa_libertadores" },
-    "conmebol.sudamericana": { name: "Copa Sul-Americana", priority: 103, emoji: "🏆", oddsKey: null },
-    "arg.1": { name: "Primera División (ARG)", priority: 85, emoji: "🇦🇷", oddsKey: "soccer_argentina_primera_division" },
-    "mex.1": { name: "Liga MX", priority: 80, emoji: "🇲🇽", oddsKey: "soccer_mexico_ligamx" },
-    "por.1": { name: "Primeira Liga", priority: 88, emoji: "🇵🇹", oddsKey: "soccer_portugal_primeira_liga" },
-};
+// Lista de ligas compartilhada (mesma do modal de aposta — não duplicar!)
+const { LEAGUES } = require("../../util/leagues");
 
 // ===================== COMANDO PRINCIPAL =====================
 
@@ -726,6 +707,10 @@ function setupBettingCollector(client, message, interaction, matches) {
                 // Calcula odds
                 const odds = match.odds || estimateOdds(match);
                 const selectedOdds = odds[betType];
+
+                // Grava a odd no servidor (o modal lê DAQUI, não do customId) — mata o
+                // exploit de forjar a odd no customId.
+                setBetOdds(`${userId}:${match.id}:${betType}`, selectedOdds);
 
                 // Cria modal para valor da aposta
                 const modal = new ModalBuilder()
