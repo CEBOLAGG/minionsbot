@@ -38,7 +38,22 @@ class ApiV2 {
 	/** @param {import("../lib/DiscordMusicBot")} client */
 	constructor(client) {
 		this.client = client;
-		this.cfg = client.config?.apiv2 || {};
+		// Usa config.apiv2 se existir; senão cai pro .env direto (config.js da VPS é
+		// gitignored e pode não ter o bloco apiv2 após um git pull).
+		const c = client.config?.apiv2 || {};
+		this.cfg = {
+			enabled: c.enabled !== undefined ? c.enabled : process.env.APIV2_ENABLED !== "false",
+			port: c.port || Number(process.env.APIV2_PORT || 4201),
+			token: c.token || process.env.BOT_API_TOKEN || "",
+			realtimeSecret: c.realtimeSecret || process.env.REALTIME_SECRET || "",
+			allowedOrigins:
+				c.allowedOrigins && c.allowedOrigins.length
+					? c.allowedOrigins
+					: (process.env.DASHBOARD_ORIGINS || "http://localhost:3000")
+							.split(",")
+							.map((s) => s.trim())
+							.filter(Boolean),
+		};
 		this.hub = null;
 	}
 
