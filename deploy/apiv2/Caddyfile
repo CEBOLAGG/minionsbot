@@ -1,11 +1,18 @@
 # Proxy HTTPS para a apiv2 do bot (REST + WebSocket).
 # O Caddy obtém e renova o certificado TLS sozinho (Let's Encrypt).
 # O domínio vem da variável API_DOMAIN do .env (ex.: minionsbot.duckdns.org).
-#
-# Forma canônica: reverse_proxy já suporta WebSocket nativamente e adiciona
-# X-Forwarded-* + Host sozinho. NÃO usar `encode` aqui — ele atrapalha o
-# "upgrade" do WebSocket em algumas versões do Caddy (causa erro 1006 no browser).
 
+# Força HTTP/1.1: o upgrade de WebSocket sobre HTTP/2 ou HTTP/3 falha (erro 1006
+# no browser) em várias versões do Caddy. Em h1 o upgrade clássico sempre funciona.
+# Tráfego é baixo (painel de controle), então não perdemos nada útil.
+{
+	servers {
+		protocols h1
+	}
+}
+
+# reverse_proxy já suporta WebSocket nativamente e adiciona X-Forwarded-* + Host.
+# NÃO usar `encode` aqui (também atrapalha o upgrade de WebSocket).
 {$API_DOMAIN} {
 	reverse_proxy bot:4201
 }
