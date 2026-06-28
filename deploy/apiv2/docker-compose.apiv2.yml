@@ -1,0 +1,30 @@
+# Override que adiciona o proxy HTTPS (Caddy) na frente da apiv2 do bot.
+# Use JUNTO do compose principal:
+#
+#   docker compose -f docker-compose.yml -f deploy/apiv2/docker-compose.apiv2.yml up -d --build
+#
+# (os caminhos relativos abaixo são resolvidos a partir da RAIZ do projeto)
+services:
+  bot:
+    # expõe a porta da apiv2 só na rede interna do compose (o Caddy alcança via "bot:4201").
+    expose:
+      - "4201"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    container_name: minions-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/apiv2/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bot
+    networks: [botnet]
+
+volumes:
+  caddy_data:
+  caddy_config:

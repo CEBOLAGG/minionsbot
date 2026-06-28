@@ -1,0 +1,14 @@
+# Proxy HTTPS para a apiv2 do bot (REST + WebSocket).
+# O Caddy obtém e renova o certificado TLS sozinho (Let's Encrypt).
+# Troque o domínio se não for api.konbdemo.xyz e aponte um registro DNS A para a VPS.
+
+api.konbdemo.xyz {
+	encode zstd gzip
+
+	# WebSocket (/ws) e REST (/v2, /health) — o Caddy faz upgrade de WS automaticamente.
+	reverse_proxy bot:4201 {
+		# repassa o cabeçalho Origin/Host para o check de origem do bot
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

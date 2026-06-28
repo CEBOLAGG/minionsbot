@@ -35,6 +35,20 @@ module.exports = {
 	cookieSecret: process.env.COOKIE_SECRET || "Coding",
 	website: "https://konbdemo.xyz",
 
+	// ===== apiv2: dashboard nova (REST + WebSocket em tempo real) — veja deploy/apiv2/ =====
+	apiv2: {
+		enabled: process.env.APIV2_ENABLED !== "false",
+		port: Number(process.env.APIV2_PORT || 4201),
+		token: process.env.BOT_API_TOKEN || "",
+		realtimeSecret: process.env.REALTIME_SECRET || "",
+		allowedOrigins: (process.env.DASHBOARD_ORIGINS || "http://localhost:3000")
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean),
+	},
+	// sync antigo pro Mongo a cada 10s (desligado por padrão; a dashboard nova usa WebSocket)
+	legacyMongoSync: process.env.LEGACY_MONGO_SYNC === "true",
+
 	// Nó do Lavalink: local = localhost | docker = lavalink (o compose injeta LAVALINK_HOST)
 	nodes: [
 		{ identifier: "main", host: process.env.LAVALINK_HOST || "localhost", port: Number(process.env.LAVALINK_PORT) || 2333, password: process.env.LAVALINK_PASSWORD || "minionsbot2026", secure: false, retryAmount: 9999, retryDelay: 7000 },
