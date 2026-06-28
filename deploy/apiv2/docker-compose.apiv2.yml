@@ -14,6 +14,10 @@ services:
     image: caddy:2
     restart: unless-stopped
     container_name: minions-caddy
+    # lê API_DOMAIN do .env (ex.: minionsbot.duckdns.org) para o Caddyfile
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "80:80"
       - "443:443"

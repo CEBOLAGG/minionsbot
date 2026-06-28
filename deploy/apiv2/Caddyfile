@@ -1,8 +1,8 @@
 # Proxy HTTPS para a apiv2 do bot (REST + WebSocket).
 # O Caddy obtém e renova o certificado TLS sozinho (Let's Encrypt).
-# Troque o domínio se não for api.konbdemo.xyz e aponte um registro DNS A para a VPS.
+# O domínio vem da variável API_DOMAIN do .env (ex.: minionsbot.duckdns.org).
 
-api.konbdemo.xyz {
+{$API_DOMAIN} {
 	encode zstd gzip
 
 	# WebSocket (/ws) e REST (/v2, /health) — o Caddy faz upgrade de WS automaticamente.

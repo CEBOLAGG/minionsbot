@@ -24,9 +24,14 @@ openssl rand -hex 32   # use como REALTIME_SECRET (nos DOIS lados)
 
 Os mesmos valores entram no `.env` do **bot** e nas variáveis da **Vercel**.
 
-## 2. Aponte o DNS
+## 2. Hostname HTTPS grátis (DuckDNS)
 
-Crie um registro **A** `api.konbdemo.xyz → IP da sua VPS` (mesmo IP do bot).
+Não precisa de domínio pago. Em [duckdns.org](https://www.duckdns.org):
+1. Entre (Google/GitHub) e crie um subdomínio, ex.: `minionsbot` → `minionsbot.duckdns.org`.
+2. No campo **current ip**, coloque o **IP público da sua VM** e clique **update ip**.
+
+Seu endereço do bot fica `https://minionsbot.duckdns.org`. (Alternativas: registrar um domínio,
+`<ip>.sslip.io` sem cadastro, ou Cloudflare Tunnel.)
 
 ## 3. Configure o `.env` do bot (na VPS)
 
@@ -35,13 +40,15 @@ Acrescente ao `.env` (veja `.env.example`):
 ```env
 APIV2_ENABLED=true
 APIV2_PORT=4201
+API_DOMAIN=minionsbot.duckdns.org
 BOT_API_TOKEN=<o-hex-de-32-do-passo-1>
 REALTIME_SECRET=<o-outro-hex-de-32>
-DASHBOARD_ORIGINS=https://SEU-PROJETO.vercel.app,http://localhost:3000
+DASHBOARD_ORIGINS=https://SEU-PROJETO.vercel.app
 LEGACY_MONGO_SYNC=false
 ```
 
-> `DASHBOARD_ORIGINS` = a(s) URL(s) da dashboard na Vercel (sem barra no fim). É o CORS/WS.
+> `API_DOMAIN` = o domínio do passo 2 (o Caddy usa p/ emitir o cert).
+> `DASHBOARD_ORIGINS` = a URL EXATA da dashboard na Vercel (sem barra no fim). É o CORS/WS.
 
 ## 4. Suba o bot com o proxy HTTPS (Caddy)
 
@@ -66,7 +73,7 @@ docker compose -f docker-compose.yml -f deploy/apiv2/docker-compose.apiv2.yml up
 Confira:
 
 ```bash
-curl https://api.konbdemo.xyz/health
+curl https://minionsbot.duckdns.org/health
 # -> {"ok":true,"ready":true,...}
 ```
 
@@ -83,10 +90,10 @@ Em **Project → Settings → Environment Variables** (veja `dashboardteste/.env
 | `DISCORD_CLIENT_SECRET` | secret do app |
 | `NEXTAUTH_SECRET` | `openssl rand -base64 32` |
 | `NEXTAUTH_URL` | `https://SEU-PROJETO.vercel.app` |
-| `BOT_API_URL` | `https://api.konbdemo.xyz` |
+| `BOT_API_URL` | `https://minionsbot.duckdns.org` |
 | `BOT_API_TOKEN` | **o mesmo** do passo 1 |
 | `REALTIME_SECRET` | **o mesmo** do passo 1 |
-| `BOT_WS_URL` | (opcional) `wss://api.konbdemo.xyz/ws` |
+| `BOT_WS_URL` | (opcional, deixe vazio — derivado de `BOT_API_URL`) |
 
 ## 6. Discord Developer Portal → OAuth2 → Redirects
 
