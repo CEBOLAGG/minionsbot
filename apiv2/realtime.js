@@ -43,6 +43,9 @@ class RealtimeHub {
 			const ticket = url.searchParams.get("ticket");
 			payload = verifyTicket(ticket, this.cfg);
 		} catch (e) {
+			this.client.warn?.(
+				`[apiv2] WS recusado (ticket inválido: ${e?.message || e}). REALTIME_SECRET bate nos dois lados?`,
+			);
 			try {
 				ws.send(JSON.stringify({ type: "error", message: "invalid ticket" }));
 			} catch {}

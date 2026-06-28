@@ -88,6 +88,9 @@ class ApiV2 {
 				const origin = req.headers.origin;
 				// se há origens permitidas, exige Origin válido (origin ausente também é negado)
 				if (allowed.length && (!origin || !allowed.includes(origin))) {
+					this.client.warn?.(
+						`[apiv2] WS recusado (origin "${origin}" não está em DASHBOARD_ORIGINS=${JSON.stringify(allowed)})`,
+					);
 					try {
 						ws.close(4003, "origin not allowed");
 					} catch {}
