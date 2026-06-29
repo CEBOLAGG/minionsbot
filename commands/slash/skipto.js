@@ -56,11 +56,9 @@ const command = new SlashCommand()
 				return interaction.editReply({ embeds: [thing] });
 			}
 			
-			// Remove tracks from 0 to position - 1
-			for (let i = 0; i < position - 1; i++) {
-				player.queue.shift();
-			}
-			player.stop();
+			// player.skip(position) descarta as (position-1) primeiras e toca a position-ésima.
+			// (player.queue.shift não existe no shim; player.stop limparia a fila e pararia.)
+			await player.skip(position, false).catch(() => {});
 			
 			let thing = new EmbedBuilder()
 				.setColor(client.config.embedColor)
@@ -69,7 +67,7 @@ const command = new SlashCommand()
 			return interaction.editReply({ embeds: [thing] });
 		} catch {
 			if (position === 1) {
-				player.stop();
+				player.skip(0, false).catch(() => {});
 			}
 			return interaction.editReply({
 				embeds: [

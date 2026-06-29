@@ -100,7 +100,9 @@ module.exports = async (client, interaction) => {
 			player.queue.unshift(currentSong);
 		}
 		player.queue.unshift(previousSong);
-		player.stop();
+		// player.skip() AVANÇA para a faixa que acabamos de pôr no início (a anterior).
+		// player.stop() (=stopPlaying no shim) limparia a fila e pararia.
+		await player.skip(0, false).catch(() => {});
 		return interaction.deferUpdate();
 	}
 
@@ -162,7 +164,8 @@ module.exports = async (client, interaction) => {
 				],
 			});
 		} else {
-			player.stop();
+			// player.skip() pula para a próxima da fila; player.stop() limparia tudo e pararia.
+			await player.skip(0, false).catch(() => {});
 			return interaction.deferUpdate();
 		}
 	}

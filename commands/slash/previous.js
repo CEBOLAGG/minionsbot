@@ -56,8 +56,8 @@ const command = new SlashCommand()
 			player.queue.unshift(currentSong);
 		}
 		player.queue.unshift(previousSong);
-		player.stop();
-		
+		player.skip(0, false).catch(() => {}); // AVANÇA p/ a anterior (player.stop limparia a fila)
+
 		interaction.reply({
 			embeds: [
 				new EmbedBuilder()

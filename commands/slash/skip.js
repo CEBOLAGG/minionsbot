@@ -58,8 +58,8 @@ const command = new SlashCommand()
 			});
 		}
 		
-		player.stop();
-		
+		player.skip(0, false).catch(() => {}); // AVANÇA (player.stop limparia a fila e pararia)
+
 		interaction.reply({
 			embeds: [
 				new EmbedBuilder()
