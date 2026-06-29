@@ -64,7 +64,10 @@ class ApiV2 {
 		}
 		try {
 			const app = express();
-			expressWs(app);
+			// perMessageDeflate: false — navegadores pedem compressão (permessage-deflate)
+			// no WebSocket; a negociação dela atrás do proxy derrubava o handshake (o browser
+			// dava "failed" e o curl, que não pede compressão, conectava). Desligar resolve.
+			expressWs(app, null, { wsOptions: { perMessageDeflate: false } });
 			app.set("trust proxy", 1);
 			// Rotas case-SENSITIVE: /Guilds ou /MOD viram 404 (defesa contra burla de auth por case).
 			app.set("case sensitive routing", true);
