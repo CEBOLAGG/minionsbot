@@ -41,7 +41,38 @@ module.exports = async (client, interaction) => {
 		}
 		
 		const filter = interaction.values[0];
-		
+
+		// Opção "Equalizador" = TOGGLE do EQ inline; mantém o dropdown de filtros aberto.
+		if (filter === "eq") {
+			const cur = client.getPlayerData(actualGuildId, "showEq") || false;
+			client.setPlayerData(actualGuildId, "showEq", !cur);
+			try { player.filters.clearFilters(); } catch {} // EQ é exclusivo com os outros filtros
+			if (!cur) {
+				try {
+					require("./Equalizer").applyEq(
+						client,
+						actualGuildId,
+						client.getPlayerData(actualGuildId, "eqGains") || [0, 0, 0, 0, 0]
+					);
+				} catch {}
+			}
+			const track = player.current || player.queue?.current;
+			if (!track) return interaction.deferUpdate();
+			const useV2 = client.getPlayerData(actualGuildId, "useComponentsV2");
+			const showVolume = client.getPlayerData(actualGuildId, "showVolume") || false;
+			const currentPosition = client.getPlayerData(actualGuildId, "trackStartTime")
+				? Date.now() - client.getPlayerData(actualGuildId, "trackStartTime")
+				: 0;
+			if (useV2) {
+				return interaction.update(
+					client.createPlayerV2(actualGuildId, player, track, { showFilters: true, showVolume, currentPosition })
+				);
+			}
+			return interaction.update({
+				components: client.createController(actualGuildId, player, { showFilters: true, showVolume }),
+			});
+		}
+
 		// Format the filter name for display
 		const filterNames = {
 			'off': 'Reset',
@@ -66,9 +97,13 @@ module.exports = async (client, interaction) => {
 		const displayName = filterNames[filter] || filter.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
 		
 		try {
-			// Reset all filters
+			// Filtros NÃO-empilháveis: limpa antes de aplicar (um efeito por vez).
+			// clearFilters zera o equalizador também, então fechamos o painel do EQ.
+			player.filters.clearFilters();
+			client.setPlayerData(actualGuildId, "showEq", false);
 			if (filter === "off") {
-				player.filters.clearFilters();
+				client.setPlayerData(actualGuildId, "eqGains", [0, 0, 0, 0, 0]);
+				client.setPlayerData(actualGuildId, "eqPreset", "Custom");
 			} else {
 				// Apply the selected filter based on type
 				switch (filter) {

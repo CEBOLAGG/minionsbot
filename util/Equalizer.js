@@ -83,7 +83,7 @@ function buildEqPanel(client, guildId, gains, presetName) {
 
 	c.addTextDisplayComponents(
 		new TextDisplayBuilder().setContent(
-			`## 🎚️ Equalizador  •  Preset: **${presetName || "Custom"}**\n` +
+			`## ${emojiTag("stats")} Equalizador  •  Preset: **${presetName || "Custom"}**\n` +
 				`Use ${emojiTag("plus")} / ${emojiTag("minus")} em cada banda — aplica **ao vivo** na música tocando.`
 		)
 	);
@@ -212,10 +212,9 @@ function addInlineEq(container, client, guildId) {
 
 	container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
 	container.addTextDisplayComponents(
-		new TextDisplayBuilder().setContent(
-			`### 🎚️ Equalizador  •  Preset: **${presetName}**\n` + "```\n" + renderBars(gains) + "\n```"
-		)
+		new TextDisplayBuilder().setContent(`### ${emojiTag("stats")} Equalizador  •  Preset: **${presetName}**`)
 	);
+	// ➕ EM CIMA do gráfico
 	container.addActionRowComponents(
 		new ActionRowBuilder().addComponents(
 			...BANDS.map((b, i) =>
@@ -227,6 +226,11 @@ function addInlineEq(container, client, guildId) {
 			)
 		)
 	);
+	// gráfico de barras no meio
+	container.addTextDisplayComponents(
+		new TextDisplayBuilder().setContent("```\n" + renderBars(gains) + "\n```")
+	);
+	// ➖ embaixo
 	container.addActionRowComponents(
 		new ActionRowBuilder().addComponents(
 			...BANDS.map((b, i) =>
