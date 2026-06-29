@@ -176,4 +176,77 @@ async function handleEqButton(client, interaction) {
 	}
 }
 
-module.exports = { buildEqPanel, handleEqButton, applyEq };
+// ── Versão INLINE (dentro do player / Now Playing) ──────────────────────────
+
+function getGains(client, guildId) {
+	return (client.getPlayerData(guildId, "eqGains") || [0, 0, 0, 0, 0]).slice();
+}
+
+// Atualiza ganhos/preset a partir de um clique inline e aplica ao vivo.
+function applyEqStep(client, guildId, action, arg) {
+	let gains = getGains(client, guildId);
+	let presetName = client.getPlayerData(guildId, "eqPreset") || "Custom";
+	if (action === "EqUp") {
+		const i = Number(arg);
+		gains[i] = clamp((gains[i] ?? 0) + STEP);
+		presetName = "Custom";
+	} else if (action === "EqDown") {
+		const i = Number(arg);
+		gains[i] = clamp((gains[i] ?? 0) - STEP);
+		presetName = "Custom";
+	} else if (action === "EqPreset") {
+		const p = PRESETS[arg] || PRESETS.flat;
+		gains = p.gains.slice();
+		presetName = p.name;
+	}
+	client.setPlayerData(guildId, "eqGains", gains);
+	client.setPlayerData(guildId, "eqPreset", presetName);
+	applyEq(client, guildId, gains);
+}
+
+// Anexa o EQ (gráfico + ➕/➖ por banda + presets) DENTRO do container do player.
+// Os botões são roteados por `controller:` para re-renderizar o player ao vivo.
+function addInlineEq(container, client, guildId) {
+	const gains = getGains(client, guildId);
+	const presetName = client.getPlayerData(guildId, "eqPreset") || "Custom";
+
+	container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+	container.addTextDisplayComponents(
+		new TextDisplayBuilder().setContent(
+			`### 🎚️ Equalizador  •  Preset: **${presetName}**\n` + "```\n" + renderBars(gains) + "\n```"
+		)
+	);
+	container.addActionRowComponents(
+		new ActionRowBuilder().addComponents(
+			...BANDS.map((b, i) =>
+				new ButtonBuilder()
+					.setCustomId(`controller:${guildId}:EqUp:${i}`)
+					.setLabel(b.label)
+					.setEmoji(emojiFor("plus"))
+					.setStyle(ButtonStyle.Success)
+			)
+		)
+	);
+	container.addActionRowComponents(
+		new ActionRowBuilder().addComponents(
+			...BANDS.map((b, i) =>
+				new ButtonBuilder()
+					.setCustomId(`controller:${guildId}:EqDown:${i}`)
+					.setLabel(b.label)
+					.setEmoji(emojiFor("minus"))
+					.setStyle(ButtonStyle.Danger)
+			)
+		)
+	);
+	container.addActionRowComponents(
+		new ActionRowBuilder().addComponents(
+			new ButtonBuilder().setCustomId(`controller:${guildId}:EqPreset:flat`).setLabel("Reset").setStyle(ButtonStyle.Secondary),
+			new ButtonBuilder().setCustomId(`controller:${guildId}:EqPreset:bass`).setLabel("Bass").setStyle(ButtonStyle.Primary),
+			new ButtonBuilder().setCustomId(`controller:${guildId}:EqPreset:vocal`).setLabel("Vocal").setStyle(ButtonStyle.Primary),
+			new ButtonBuilder().setCustomId(`controller:${guildId}:EqPreset:rock`).setLabel("Rock").setStyle(ButtonStyle.Primary),
+			new ButtonBuilder().setCustomId(`controller:${guildId}:EqPreset:pop`).setLabel("Pop").setStyle(ButtonStyle.Primary)
+		)
+	);
+}
+
+module.exports = { buildEqPanel, handleEqButton, applyEq, addInlineEq, applyEqStep };

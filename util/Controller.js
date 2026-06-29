@@ -251,6 +251,7 @@ module.exports = async (client, interaction) => {
 		if (!currentShowFilters) {
 			client.setPlayerData(guildId, "showVolume", false);
 			client.setPlayerData(guildId, "showQueue", false);
+			client.setPlayerData(guildId, "showEq", false);
 		}
 		
 		const currentSong = player.current || player.queue?.current;
@@ -269,6 +270,58 @@ module.exports = async (client, interaction) => {
 					components: client.createController(guildId, player, { showFilters: !currentShowFilters, showVolume: false }),
 				});
 			}
+		}
+		return interaction.deferUpdate();
+	}
+
+	if (property === "ToggleEq") {
+		const useComponentsV2 = client.getPlayerData(guildId, "useComponentsV2");
+		if (!useComponentsV2) {
+			// player clássico não tem EQ inline → abre o painel do /equalizer (ephemeral)
+			const { buildEqPanel } = require("./Equalizer");
+			const gains = (client.getPlayerData(guildId, "eqGains") || [0, 0, 0, 0, 0]).slice();
+			const preset = client.getPlayerData(guildId, "eqPreset") || "Custom";
+			const panel = buildEqPanel(client, guildId, gains, preset);
+			return interaction.reply({ ...panel, flags: panel.flags | MessageFlags.Ephemeral }).catch(() => {});
+		}
+		const cur = client.getPlayerData(guildId, "showEq") || false;
+		client.setPlayerData(guildId, "showEq", !cur);
+		if (!cur) {
+			client.setPlayerData(guildId, "showVolume", false);
+			client.setPlayerData(guildId, "showQueue", false);
+			client.setPlayerData(guildId, "showFilters", false);
+		}
+		const currentSong = player.current || player.queue?.current;
+		const currentPosition = client.getPlayerData(guildId, "trackStartTime")
+			? Date.now() - client.getPlayerData(guildId, "trackStartTime")
+			: 0;
+		if (currentSong) {
+			return interaction.update(
+				client.createPlayerV2(guildId, player, currentSong, {
+					showFilters: client.getPlayerData(guildId, "showFilters") || false,
+					showVolume: client.getPlayerData(guildId, "showVolume") || false,
+					currentPosition,
+				})
+			);
+		}
+		return interaction.deferUpdate();
+	}
+
+	if (property === "EqUp" || property === "EqDown" || property === "EqPreset") {
+		const arg = interaction.customId.split(":")[3];
+		require("./Equalizer").applyEqStep(client, guildId, property, arg);
+		const currentSong = player.current || player.queue?.current;
+		const currentPosition = client.getPlayerData(guildId, "trackStartTime")
+			? Date.now() - client.getPlayerData(guildId, "trackStartTime")
+			: 0;
+		if (currentSong) {
+			return interaction.update(
+				client.createPlayerV2(guildId, player, currentSong, {
+					showFilters: client.getPlayerData(guildId, "showFilters") || false,
+					showVolume: client.getPlayerData(guildId, "showVolume") || false,
+					currentPosition,
+				})
+			);
 		}
 		return interaction.deferUpdate();
 	}
@@ -485,6 +538,7 @@ module.exports = async (client, interaction) => {
 		if (!currentShowVolume) {
 			client.setPlayerData(guildId, "showFilters", false);
 			client.setPlayerData(guildId, "showQueue", false);
+			client.setPlayerData(guildId, "showEq", false);
 		}
 		
 		const currentSong = player.current || player.queue?.current;
@@ -535,9 +589,10 @@ module.exports = async (client, interaction) => {
 		const showQueue = client.getPlayerData(guildId, "showQueue") || false;
 		client.setPlayerData(guildId, "showQueue", !showQueue);
 		if (!showQueue) {
-			// abrindo a fila: fecha volume/filtros e volta pra página 0
+			// abrindo a fila: fecha volume/filtros/eq e volta pra página 0
 			client.setPlayerData(guildId, "showVolume", false);
 			client.setPlayerData(guildId, "showFilters", false);
+			client.setPlayerData(guildId, "showEq", false);
 			client.setPlayerData(guildId, "queuePage", 0);
 		}
 		return rerenderPlayer();
